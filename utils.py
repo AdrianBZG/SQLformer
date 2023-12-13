@@ -3,11 +3,13 @@ Module that contains utility functions
 """
 
 import pickle
+import numpy as np
 import torch
 import torch.nn.functional as F
-import torch_optimizer as optim
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from torch.nn import BCEWithLogitsLoss
+
+from models.utils import get_plm_transformer
 
 
 def masked_bce_with_logits_loss(output, target, mask):
@@ -80,13 +82,6 @@ def create_optimizer(optimizer_type, model, config):
                                      lr=config.get('learning_rate'),
                                      betas=(0.9, 0.98),
                                      eps=1e-9)
-    elif optimizer_type == "adafactor":
-        optimizer = optim.Adafactor(model.parameters(),
-                                    scale_parameter=True,
-                                    relative_step=False,
-                                    warmup_init=False,
-                                    lr=config.get('learning_rate'),
-                                    weight_decay=config.get('weight_decay'))
     else:
         raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
@@ -162,3 +157,28 @@ def pad_tensor(tensor, max_size, dim=1):
 def save_to_pickle(object_to_save, path):
     with open(path, 'wb') as handle:
         pickle.dump(object_to_save, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def get_sentence_embedding(sentence):
+    sentence_embeddings = {}
+    sentence_split = sentence.split(" ")
+
+    plm = get_plm_transformer()
+    model = plm['model']
+    tokenizer = plm['tokenizer']
+
+    # Tokenize the sentence and get embeddings
+    encoded = tokenizer.encode_plus(sentence, return_tensors="pt")
+    with torch.no_grad():
+        hidden_states = model(**encoded).last_hidden_state[0]
+
+    # Get sub-words embeddings for each original sentence word and pool them
+    for idx, word in enumerate(sentence_split):
+        token_ids_word = np.where(np.array(encoded.word_ids()) == idx)
+        word_embedding = hidden_states[token_ids_word].mean(dim=0)
+        sentence_embeddings[word] = word_embedding
+
+    emb_shape = sentence_embeddings[sentence_split[0]].shape
+    assert all(emb.shape == emb_shape for emb in sentence_embeddings.values())
+
+    return sentence_embeddings

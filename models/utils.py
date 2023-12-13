@@ -8,16 +8,20 @@ from torch.autograd import Variable
 from torch.nn import ModuleList
 import torch.nn.functional as F
 import numpy as np
+from transformers import AutoTokenizer, AutoModel
 from sentence_transformers import SentenceTransformer
-SENTENCE_TRANSFORMER = None
+TRANSFORMER_MODEL = None
+TRANSFORMER_TOKENIZER = None
 
 
-def get_sentence_transformer(model_name='all-roberta-large-v1'):
-    global SENTENCE_TRANSFORMER
-    if SENTENCE_TRANSFORMER is None:
-        SENTENCE_TRANSFORMER = SentenceTransformer(model_name)
+def get_plm_transformer(model_name='roberta-base'):
+    global TRANSFORMER_MODEL, TRANSFORMER_TOKENIZER
+    if TRANSFORMER_MODEL is None:
+        TRANSFORMER_TOKENIZER = AutoTokenizer.from_pretrained(model_name)
+        TRANSFORMER_MODEL = AutoModel.from_pretrained(model_name)
 
-    return SENTENCE_TRANSFORMER
+    return {"model": TRANSFORMER_MODEL,
+            "tokenizer": TRANSFORMER_TOKENIZER}
 
 
 def adjust_softmax(y):

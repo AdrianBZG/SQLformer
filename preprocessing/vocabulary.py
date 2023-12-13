@@ -42,12 +42,8 @@ class Vocabulary(object):
                                self.UNK_TOKEN,
                                self.SEP_TOKEN]
 
-        self.sentence_model = sentence_model
-        self.sentence_model.tokenizer.pad_token = self.PAD_TOKEN
-        self.sentence_model.tokenizer.bos_token = self.SOS_TOKEN
-        self.sentence_model.tokenizer.eos_token = self.EOS_TOKEN
-        self.sentence_model.tokenizer.unk_token = self.UNK_TOKEN
-        self.sentence_model.tokenizer.sep_token = self.SEP_TOKEN
+        self.sentence_model = sentence_model['model']
+        self.tokenizer = sentence_model['tokenizer']
 
     def add_word(self, word):
         if word not in self.word2idx:
@@ -96,6 +92,8 @@ class Vocabulary(object):
 
     def get_word_embedding(self, word, device="gpu"):
         if word not in self.word2embedding:
+            encoded_input = tokenizer(text, return_tensors='pt')
+            output = model(**encoded_input)
             emb = self.sentence_model.encode([word],
                                              show_progress_bar=False,
                                              convert_to_tensor=True)

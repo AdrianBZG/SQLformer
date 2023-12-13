@@ -4,11 +4,11 @@ configs["training"] = {}
 
 
 configs["preprocessing"]["base"] = {"generate_schema": False,
-                                    "generate_questions": False,
-                                    "generate_queries": True,
-                                    "init_model": 'all-roberta-large-v1',  # ['all-roberta-large-v1', 'grappa_large_jnt']
+                                    "generate_questions": True,
+                                    "generate_queries": False,
+                                    "init_model": 'roberta-base',  # ['all-roberta-large-v1', 'grappa_large_jnt']
                                     "root_path": "data/spider",
-                                    "splits": ["train_spider", "dev"],
+                                    "splits": ["train_spider"],
                                     "output_path": "data/spider"}
 
 configs["training"]["base"] = {"root_path": "data/spider",
@@ -40,7 +40,7 @@ configs["training"]["base"] = {"root_path": "data/spider",
                                "dropout": 0.1,
                                "k_tables": 20,
                                "k_columns": 20,
-                               "optimizer": "adafactor",
+                               "optimizer": "adam",
                                "learning_rate": 1e-3,
                                "weight_decay": 5e-6,
                                "teacher_forcing_ratio": 1.0,

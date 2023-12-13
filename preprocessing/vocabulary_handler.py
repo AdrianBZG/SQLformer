@@ -12,7 +12,7 @@ from nltk.corpus import stopwords
 stop_words = set(stopwords.words('english'))
 
 from preprocessing.vocabulary import Vocabulary
-from models.utils import get_sentence_transformer
+from models.utils import get_plm_transformer
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
@@ -70,7 +70,7 @@ def build_questions_vocab(input_file_path, remove_stopwords=False):
                                  logging_level='WARNING',
                                  download_method=DownloadMethod.REUSE_RESOURCES)
 
-    vocab = Vocabulary(sentence_model=get_sentence_transformer())
+    vocab = Vocabulary(sentence_model=get_plm_transformer())
 
     for index, entry in enumerate(tqdm(input_file)):
         # Get the question and other related data
@@ -91,9 +91,9 @@ def build_questions_vocab(input_file_path, remove_stopwords=False):
 def build_schema_vocab(input_file_path, remove_stopwords=False):
     input_file = json.load(open(input_file_path, "r"))
 
-    vocab = Vocabulary(sentence_model=get_sentence_transformer())
-    tables_vocab = Vocabulary(sentence_model=get_sentence_transformer())
-    columns_vocab = Vocabulary(sentence_model=get_sentence_transformer())
+    vocab = Vocabulary(sentence_model=get_plm_transformer())
+    tables_vocab = Vocabulary(sentence_model=get_plm_transformer())
+    columns_vocab = Vocabulary(sentence_model=get_plm_transformer())
     columns_vocab.add_word("*")
 
     col_name_to_original_mapping = dict()

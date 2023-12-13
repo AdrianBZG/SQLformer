@@ -1,0 +1,29 @@
+name: sqlformerenv
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+  - huggingface
+dependencies:
+  - python=3.9
+  - conda==23.10.0
+  - setuptools
+  - pip
+  - wheel
+  - conda-content-trust
+  - conda-libmamba-solver
+  - pytorch==2.1.1
+  - pytorch_geometric==2.4.0
+  - torchaudio
+  - torchvision
+  - scikit-learn==1.3.2
+  - stanza==1.7.0
+  - nltk==3.8.1
+  - transformers==4.35.2
+  - sentence-transformers==2.2.2
+  - tqdm
+  - sqlglot
+  - openblas
+  - scipy==1.11.4
+  - pytest==7.4.3
+  - networkx==2.8.7

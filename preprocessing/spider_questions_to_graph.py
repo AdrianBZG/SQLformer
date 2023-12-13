@@ -8,8 +8,11 @@ from typing import List
 import logging
 from stanza import DownloadMethod
 from tqdm import tqdm
+import torch
 from torch_geometric.utils.convert import from_networkx
 import stanza
+
+from utils import get_sentence_embedding
 from preprocessing.vocabulary_handler import strip_nl
 
 logging.basicConfig(
@@ -23,9 +26,11 @@ logger = logging.getLogger("SpiderQuestionsToGraph")
 class SpiderNLGraphNode:
     def __init__(self,
                  name: str,
-                 type: str):
+                 type: str,
+                 embedding=None):
         self.name = name
         self.type = type
+        self.embedding = embedding
 
     def __str__(self):
         return f'{self.name}'
@@ -77,30 +82,39 @@ class SpiderNLQuestion:
 
     def _single_graph_to_networkx(self, graph):
         '''
-        Transforms graph into a NetworkX Levi Graph
+        Transforms graph into Networkx format and converts into Levi graph
         '''
         networkx_graph = nx.Graph()
 
         # Connect all nodes in line
         node_names = set()
+        node_embeddings = {}
+        edge_type_embeddings = {}  # Edge type node embeddings are initialized randomly
         for edge in graph:
             source_node = edge.source
             target_node = edge.target
+            node_embeddings[source_node.name] = source_node.embedding
+            node_embeddings[target_node.name] = target_node.embedding
             node_names.add(source_node)
             node_names.add(target_node)
+            if edge.edge_type not in edge_type_embeddings:
+                edge_type_embeddings[edge.edge_type] = torch.randn_like(source_node.embedding)
 
         for previous, current in zip(list(node_names), list(node_names)[1:]):
             previous_name = previous.name
             current_name = current.name
             if previous_name not in networkx_graph:
-                node_embedding = self.vocabulary.get_word_embedding(previous_name)
+                if node_embeddings[previous_name] is None:
+                    print(previous_name)
+                    raise ValueError('test1')
                 networkx_graph.add_node(previous_name,
-                                        x=node_embedding)
+                                        x=node_embeddings[previous_name])
 
             if current_name not in networkx_graph:
-                node_embedding = self.vocabulary.get_word_embedding(current_name)
+                if node_embeddings[current_name] is None:
+                    raise ValueError('test2')
                 networkx_graph.add_node(current_name,
-                                        x=node_embedding)
+                                        x=node_embeddings[current_name])
 
             networkx_graph.add_edge(previous_name, current_name)
 
@@ -111,19 +125,20 @@ class SpiderNLQuestion:
 
             # Add nodes if not exist
             if source_node.name not in networkx_graph:
-                node_embedding = self.vocabulary.get_word_embedding(source_node.name)
+                if node_embeddings[source_node.name] is None:
+                    raise ValueError('test3')
                 networkx_graph.add_node(source_node.name,
-                                        x=node_embedding)
+                                        x=node_embeddings[source_node.name])
 
             if target_node.name not in networkx_graph:
-                node_embedding = self.vocabulary.get_word_embedding(target_node.name)
+                if node_embeddings[target_node.name] is None:
+                    raise ValueError('test4')
                 networkx_graph.add_node(target_node.name,
-                                        x=node_embedding)
+                                        x=node_embeddings[target_node.name])
 
             if edge.edge_type not in networkx_graph:
-                node_embedding = self.vocabulary.get_word_embedding(edge.edge_type)
                 networkx_graph.add_node(edge.edge_type,
-                                        x=node_embedding)
+                                        x=edge_type_embeddings[edge.edge_type])
 
             # Add edges
             networkx_graph.add_edge(source_node.name, edge.edge_type)
@@ -181,12 +196,12 @@ class SpiderNLQuestion:
         item_dict["question_strip"] = self.question_strip
         item_dict["vocabulary"] = self.vocabulary
         item_dict["pyg"] = self.to_pyg()
-        item_dict["networkx"] = self.to_networkx()
+        #item_dict["networkx"] = self.to_networkx()
 
         return item_dict
 
 
-def _get_pos_tag_graph(stanza_input):
+def _get_pos_tag_graph(stanza_input, sentence_embeddings):
     pos_graph_edges = list()
     pos_tagging = dict()
     for sentence in stanza_input.sentences:
@@ -199,15 +214,15 @@ def _get_pos_tag_graph(stanza_input):
             logger.debug(f'{word.text}: {word.pos}')
 
     for word, pos in pos_tagging.items():
-        word_node = SpiderNLGraphNode(word, "word")
-        pos_tag_node = SpiderNLGraphNode(pos, "pos_tag")
+        word_node = SpiderNLGraphNode(word, "word", embedding=sentence_embeddings[word])
+        pos_tag_node = SpiderNLGraphNode(pos, "pos_tag", embedding=torch.randn_like(sentence_embeddings[word]))
         word_pos_edge = SpiderNLGraphEdge(word_node, "has_pos", pos_tag_node)
         pos_graph_edges.append(word_pos_edge)
 
     return pos_graph_edges
 
 
-def _get_dependency_graph(stanza_input):
+def _get_dependency_graph(stanza_input, sentence_embeddings):
     dependency_graph_edges = list()
     dependencies = stanza_input.sentences[0].dependencies
     for dependency in dependencies:
@@ -228,8 +243,10 @@ def _get_dependency_graph(stanza_input):
 
         logger.debug(f'{dependency_source.text} - {dependency_type} - {dependency_target.text}')
 
-        source_word_node = SpiderNLGraphNode(dependency_source.text, "word")
-        target_word_node = SpiderNLGraphNode(dependency_target.text, "word")
+        source_word_node = SpiderNLGraphNode(dependency_source.text, "word",
+                                             embedding=sentence_embeddings[dependency_source.text])
+        target_word_node = SpiderNLGraphNode(dependency_target.text, "word",
+                                             embedding=sentence_embeddings[dependency_target.text])
         dependency_edge = SpiderNLGraphEdge(source_word_node, dependency_type, target_word_node)
         dependency_graph_edges.append(dependency_edge)
 
@@ -258,16 +275,31 @@ def read_dataset_questions(input_file_path, vocabulary):
                                      remove_stopwords=False,
                                      lower=False)
 
+        print(nl_question_strip)
+        print(nl_question)
+
         # Process using Stanza
         stanza_processed_nl = stanza_nlp(nl_question)
         logger.debug(nl_question)
 
+        nl_processed = []
+        for sentence in stanza_processed_nl.sentences:
+            for word in sentence.words:
+                nl_processed.append(word.text)
+
+        nl_processed = " ".join(nl_processed)
+
+        # Get sentence embedding
+        sentence_embeddings = get_sentence_embedding(nl_processed)
+
         # Get part-of-speech tagging
-        pos_graph_edges = _get_pos_tag_graph(stanza_processed_nl)
+        pos_graph_edges = _get_pos_tag_graph(stanza_processed_nl,
+                                             sentence_embeddings)
         logger.debug(pos_graph_edges)
 
         # Get dependency graph
-        dependency_graph_edges = _get_dependency_graph(stanza_processed_nl)
+        dependency_graph_edges = _get_dependency_graph(stanza_processed_nl,
+                                                       sentence_embeddings)
         logger.debug(dependency_graph_edges)
 
         spider_nl_question = SpiderNLQuestion(identifier=question_identifier,
