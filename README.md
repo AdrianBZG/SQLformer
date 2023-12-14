@@ -20,13 +20,15 @@ We are still polishing up the code and will submit the updated version soon. Tha
 
 # Citation
 
-You can cite our work with the following BibTeX entry:
+If you use SQLformer in your work, we would appreciate using the following citation:
 
-`@misc{bazaga2023sqlformer,
+```
+@misc{bazaga2023sqlformer,
       title={SQLformer: Deep Auto-Regressive Query Graph Generation for Text-to-SQL Translation}, 
       author={Adrián Bazaga and Pietro Liò and Gos Micklem},
       year={2023},
       eprint={2310.18376},
       archivePrefix={arXiv},
       primaryClass={cs.CL}
-}`
+}
+```
