@@ -10,7 +10,7 @@ import sqlglot as sqlglot
 
 from loaders.dataset_loader import load_dataset_schemas
 from data.dataset import AST_NODE_TYPES
-from preprocessing.spider_questions_to_graph import SpiderNLGraphNode, SpiderNLGraphEdge
+from preprocessing.structures import SpiderQueryGraph
 
 logger = logging.getLogger("SpiderQueriesToGraph")
 
@@ -18,137 +18,6 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
     level=logging.INFO,
     datefmt='%Y-%m-%d %H:%M:%S')
-
-
-class SpiderQueryGraph:
-    def __init__(self,
-                 identifier,
-                 db_id,
-                 db_id_original,
-                 query,
-                 root_node,
-                 adjacency_list,
-                 node_type_list,
-                 table_tokens,
-                 column_tokens,
-                 vocabulary):
-
-        self.identifier = identifier
-        self.db_id = db_id
-        self.db_id_original = db_id_original
-        self.query = query
-        self.root_node = root_node
-        self.adjacency_list = adjacency_list
-        self.node_type_list = node_type_list
-        self.vocabulary = vocabulary
-        self.table_tokens = table_tokens
-        self.column_tokens = column_tokens
-
-    def __str__(self):
-        return f'([ID: {self.identifier}] DB: {self.db_id}) {self.query} | {self.adjacency_list} | {self.node_type_list}'
-
-    def __repr__(self):
-        return f'([ID: {self.identifier}] DB: {self.db_id}) {self.query} | {self.adjacency_list} | {self.node_type_list}'
-
-    def to_adjacency_matrix(self):
-        graph = self.adjacency_list
-        keys = sorted(graph.keys())
-        size = len(keys)
-
-        matrix = [[0] * size for _ in range(size)]
-
-        # We iterate over the key:value entries in the dictionary first,
-        # then we iterate over the elements within the value
-        for a, b in [(keys.index(a), keys.index(b)) for a, row in graph.items() for b in row]:
-            # Use 1 to represent if there's an edge
-            # Use 2 to represent when node meets itself in the matrix (A -> A)
-            matrix[a][b] = 2 if (a == b) else 1
-
-        return matrix
-
-    def to_bfs_adjacency_matrix(self):
-        graph = self.adjacency_list
-        keys = sorted(graph.keys())
-        size = len(keys)
-
-        matrix = [[0] * size for _ in range(size)]
-
-        for node_id in keys:
-            if node_id < 1:
-                # Root node doesn't have any previous nodes, so adjacency vector is all-zero
-                continue
-
-            # Check single connections as it's a tree
-            if len(graph[node_id]) > 1:
-                raise ValueError(f'Node ID {node_id} has more than 1 parent, which is invalid for a tree structure.')
-
-            connected_node = graph[node_id][0]
-            adjacency_vector_index = node_id - connected_node - 1
-            matrix[node_id][adjacency_vector_index] = 1
-
-        return matrix
-
-    def get_node_type_matrix(self):
-        node_type_list = self.node_type_list
-        keys = sorted(node_type_list.keys())
-        num_nodes = len(keys)
-        vocab_size = len(self.vocabulary)
-        matrix = [[0] * vocab_size for _ in range(num_nodes)]
-
-        for node_id in keys:
-            node_type = node_type_list[node_id]
-            vector_index = self.vocabulary.index(node_type)
-            matrix[node_id][vector_index] = 1
-
-        return matrix
-
-    def to_dict(self):
-        item_dict = dict()
-
-        item_dict["identifier"] = self.identifier
-        item_dict["db_id"] = self.db_id
-        item_dict["db_id_original"] = self.db_id_original
-        item_dict["query"] = self.query
-        item_dict["root_node"] = self.root_node
-        item_dict["adjacency_list"] = self.adjacency_list
-        item_dict["node_type_list"] = self.node_type_list
-        item_dict["vocabulary"] = self.vocabulary
-        item_dict["adjacency_matrix"] = self.to_adjacency_matrix()
-        item_dict["bfs_adjacency_matrix"] = self.to_bfs_adjacency_matrix()
-        item_dict["node_type_matrix"] = self.get_node_type_matrix()
-        item_dict["table_tokens"] = self.table_tokens
-        item_dict["column_tokens"] = self.column_tokens
-
-        return item_dict
-
-
-def _get_dependency_graph(stanza_input):
-    dependency_graph_edges = list()
-    dependencies = stanza_input.sentences[0].dependencies
-    for dependency in dependencies:
-        dependency_source = dependency[0]
-        dependency_type = dependency[1]
-        dependency_target = dependency[2]
-
-        # Skip dependencies involving the root (id = 0)
-        if dependency_source.id == 0 or dependency_target.id == 0:
-            continue
-
-        # Skip dependencies involving PUNCT elements
-        if dependency_source.upos == "PUNCT" or dependency_target.upos == "PUNCT":
-            continue
-
-        # Clean the dependency type
-        dependency_type = dependency_type.split(":")[0]
-
-        logger.debug(f'{dependency_source.text} - {dependency_type} - {dependency_target.text}')
-
-        source_word_node = SpiderNLGraphNode(dependency_source.text, "word")
-        target_word_node = SpiderNLGraphNode(dependency_target.text, "word")
-        dependency_edge = SpiderNLGraphEdge(source_word_node, dependency_type, target_word_node)
-        dependency_graph_edges.append(dependency_edge)
-
-    return dependency_graph_edges
 
 
 def get_ast_from_query(identifier, db_id, db_id_original, query, sql_node_types_vocabulary,

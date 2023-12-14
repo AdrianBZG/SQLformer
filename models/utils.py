@@ -24,10 +24,10 @@ def get_plm_transformer(model_name='roberta-base'):
             "tokenizer": TRANSFORMER_TOKENIZER}
 
 
-def adjust_softmax(y):
+def adjust_softmax(y, device):
     max_idx = torch.argmax(y, dim=2, keepdim=True)
     y.zero_()
-    one_value = torch.full(max_idx.shape, 1, dtype=torch.float).cuda()
+    one_value = torch.full(max_idx.shape, 1, dtype=torch.float).to(device)
     y.scatter_(dim=2, index=max_idx, src=one_value)
     return y
 

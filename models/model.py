@@ -14,7 +14,6 @@ from utils import pad_and_mask_combined_graph, construct_future_mask
 from torch import multiprocessing as torchmultiprocessing
 torchmultiprocessing.set_sharing_strategy('file_system')
 
-PRECOMPUTED_NODE_EMBEDDING_SIZE = 1024
 NUMBER_QUERY_NODE_TYPES = len(AST_NODE_TYPES)
 
 
@@ -38,14 +37,14 @@ class Model(nn.Module):
         self.k_columns = config.get('k_columns')
 
         self.schema_encoder = get_gnn_encoder(config.get('encoder_schema_gnn_type'),
-                                              in_channels=PRECOMPUTED_NODE_EMBEDDING_SIZE,
+                                              in_channels=config.get('encoder_input_dim'),
                                               out_channels=config.get('encoder_schema_hidden_dim'),
                                               params={"heads": config.get('encoder_schema_num_heads'),
                                                       "layers": config.get('encoder_schema_num_layers'),
                                                       "dropout": config.get('dropout')})
 
         self.question_graph_encoder = get_gnn_encoder(config.get('encoder_question_gnn_type'),
-                                                      in_channels=PRECOMPUTED_NODE_EMBEDDING_SIZE,
+                                                      in_channels=config.get('encoder_input_dim'),
                                                       out_channels=config.get('encoder_question_hidden_dim'),
                                                       params={"heads": config.get('encoder_question_num_heads'),
                                                               "layers": config.get('encoder_question_num_layers'),
@@ -106,15 +105,11 @@ class Model(nn.Module):
                                               config.get('encoder_question_hidden_dim'))
 
         # Decoder output heads
-        self.adj_out_1 = Linear(config.get('decoder_node_adj_emb_hidden_dim'),
-                                config.get('decoder_node_adj_emb_hidden_dim'))
-        self.adj_out_2 = Linear(config.get('decoder_node_types_emb_hidden_dim'),
-                                config.get('max_prev_bfs_node'))
+        self.adj_out = Linear(config.get('decoder_node_types_emb_hidden_dim'),
+                              config.get('max_prev_bfs_node'))
 
-        self.types_out_1 = Linear(config.get('decoder_node_types_emb_hidden_dim'),
-                                  config.get('decoder_node_types_emb_hidden_dim'))
-        self.types_out_2 = Linear(config.get('decoder_node_types_emb_hidden_dim'),
-                                  self.output_vocab_dim)
+        self.types_out = Linear(config.get('decoder_node_types_emb_hidden_dim'),
+                                self.output_vocab_dim)
 
         self.apply(xavier_init_weights)
 
@@ -139,33 +134,33 @@ class Model(nn.Module):
         schema_g_rep = schema_g.unsqueeze(1).repeat(1, pad_graph_batch.shape[1], 1)
         combined_graph_w_schema = pad_graph_batch + schema_g_rep
 
-        add_tokens = lambda x, token: torch.stack([torch.vstack((token, x[i])) for i in range(len(x))])
-        combined_graph_w_tokens = add_tokens(combined_graph_w_schema, self.table_token + self.column_token)
+        def _add_token(x, token):
+            return torch.stack([torch.vstack((token, x[i])) for i in range(len(x))])
+
+        combined_graph_w_tokens = combined_graph_w_schema
+        combined_graph_w_tokens = _add_token(combined_graph_w_tokens, self.column_token)
+        combined_graph_w_tokens = _add_token(combined_graph_w_tokens, self.table_token)
 
         question_encoded = self.transformer_enc(self.src_positional_encoding(combined_graph_w_tokens), pad_mask)
         X_tables, X_columns, X_question = question_encoded[:, 0], question_encoded[:, 1], question_encoded[:, 2:]
+        Xk_tables = self.tables_embedding(F.softmax(self.mlp_tables(X_tables), dim=-1).topk(self.k_tables, dim=1)[1])
+        Xk_columns = self.columns_embedding(F.softmax(self.mlp_tables(X_columns), dim=-1).topk(self.k_columns, dim=1)[1])
 
-        get_top_k = lambda logits, k, embedding: embedding(F.softmax(logits, dim=-1).topk(k, dim=1)[1]).mean(1)
-        Xk_tables, Xk_columns = get_top_k(self.mlp_tables(X_tables), self.k_tables, self.tables_embedding), get_top_k(
-            self.mlp_columns(X_columns), self.k_columns, self.columns_embedding)
+        X_schema_hat = torch.cat([Xk_tables, Xk_columns], dim=1)
+        X_question_hat = torch.einsum('bij,blj->blj', X_schema_hat, X_question)
 
-        X_schema_hat, X_question_hat = torch.cat([Xk_tables, Xk_columns], dim=1), torch.einsum('bij,blm->blm',
-                                                                                               torch.cat([Xk_tables,
-                                                                                                          Xk_columns],
-                                                                                                         dim=1),
-                                                                                               X_question)
-
-        apply_linear = lambda x, layer: layer(F.relu(x))
-        x_adj_embed, x_node_types_embed = apply_linear(x_adj, self.node_adj_linear), apply_linear(x_node_types,
-                                                                                                  self.node_type_linear)
+        x_adj_embed = self.node_adj_linear(F.relu(x_adj))
+        x_node_types_embed = self.node_type_linear(F.relu(x_node_types))
 
         future_mask_adj = construct_future_mask(x_adj_embed.shape[1], device=device)
-        decoded_adj, decoded_nt = self.transformer_dec(X_question_hat, pad_mask[:, 2:], x_adj_embed, future_mask_adj,
-                                                       x_node_types_embed)
+        decoded_adj, decoded_nt = self.transformer_dec(X_question_hat,
+                                                       x_adj_embed,
+                                                       x_node_types_embed,
+                                                       pad_mask[:, 2:],
+                                                       future_mask_adj)
 
-        output_adj, output_node_type = apply_linear(decoded_adj, self.adj_out_2), apply_linear(decoded_nt,
-                                                                                               self.types_out_2)
-
+        output_adj = self.adj_out(F.relu(decoded_adj))
+        output_node_type = self.types_out(F.relu(decoded_nt))
         return output_adj, output_node_type, self.mlp_tables(X_tables), self.mlp_columns(X_columns), pad_seq_len
 
     def init_params(self):

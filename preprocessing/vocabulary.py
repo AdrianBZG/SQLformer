@@ -90,20 +90,6 @@ class Vocabulary(object):
         self.update_counter()
         return self.vocab_cnt
 
-    def get_word_embedding(self, word, device="gpu"):
-        if word not in self.word2embedding:
-            encoded_input = tokenizer(text, return_tensors='pt')
-            output = model(**encoded_input)
-            emb = self.sentence_model.encode([word],
-                                             show_progress_bar=False,
-                                             convert_to_tensor=True)
-            self.word2embedding[word] = emb[0]
-
-        if device == "cpu":
-            return self.word2embedding[word].to("cpu")
-
-        return self.word2embedding[word]
-
     def as_list(self):
         return list(self.word2idx.keys())
 

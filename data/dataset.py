@@ -4,7 +4,7 @@ Module to wrap the dataset into a PyTorch Dataset
 import logging
 import time
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, RandomSampler
 import torch_geometric.transforms as T
 
 graph_transforms = T.Compose([T.ToUndirected(),
@@ -121,7 +121,7 @@ def get_multi_hot_targets(target_tokens, vocabulary):
     return multi_hot
 
 
-def generate_square_subsequent_mask(sz, device='cuda'):
+def generate_square_subsequent_mask(sz, device):
     r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
         Unmasked positions are filled with float(0.0).
     """
@@ -262,9 +262,10 @@ def get_dataset(root_path, split="dev", max_prev_node=4):
 
 
 def get_data_loader(dataset, tables_vocab, columns_vocab, batch_size=16, shuffle=False, num_workers=4):
+    train_sampler = RandomSampler(dataset)
     data_loader = DataLoader(dataset,
                              batch_size=batch_size,
-                             shuffle=shuffle,
+                             sampler=train_sampler if shuffle else None,
                              num_workers=num_workers,
                              collate_fn=lambda batch: ordered_seq_len_collate_function(batch,
                                                                                        tables_vocab,

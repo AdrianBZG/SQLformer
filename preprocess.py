@@ -30,9 +30,6 @@ def _generate_schema(output_path, tables_path, schema_vocab):
 
     logger.info(spider_schema.get(list(spider_schema.keys())[0]))
 
-    spider_schema_networkx = spider_schema.get(list(spider_schema.keys())[0])["networkx"]
-    logger.info(spider_schema_networkx)
-
     spider_schema_pyg = spider_schema.get(list(spider_schema.keys())[0])["pyg"]
     logger.info(spider_schema_pyg)
 
@@ -49,7 +46,6 @@ def _generate_questions(spider_path, questions_vocabulary, splits, output_path):
         spider_questions = read_dataset_questions(spider_path[split],
                                                   vocabulary=questions_vocabulary[split])
 
-        logger.info(spider_questions[0]["networkx"]["pos"])
         logger.info(spider_questions[0]["pyg"]["pos"])
 
         file_path_to_save = f"{output_path}/{split}_questions_graph.pickle"

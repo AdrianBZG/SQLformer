@@ -3,6 +3,7 @@ Module that contains utility functions
 """
 
 import pickle
+import random
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -56,11 +57,11 @@ def calculate_loss(x_adj_padding_mask, y_adj, output_adj, output_node_type, y_no
                                                 y_node_types,
                                                 x_adj_padding_mask)
 
-    loss_table_concepts = masked_cross_entropy_loss(tables_logits,
-                                                    y_table_targets)
+    loss_table_concepts = F.cross_entropy(tables_logits,
+                                          y_table_targets)
 
-    loss_column_concepts = masked_cross_entropy_loss(columns_logits,
-                                                     y_column_targets)
+    loss_column_concepts = F.cross_entropy(columns_logits,
+                                           y_column_targets)
 
     loss_lambda = config.get('loss_lambda')
 
@@ -73,15 +74,22 @@ def calculate_loss(x_adj_padding_mask, y_adj, output_adj, output_node_type, y_no
 
 
 def create_optimizer(optimizer_type, model, config):
+    param_optimizer = list(model.named_parameters())
+    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+    optimizer_grouped_parameters = [
+        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+    ]
+
     if optimizer_type == "adamw":
         optimizer = torch.optim.AdamW(list(model.parameters()),
                                       lr=config.get('learning_rate'),
-                                      weight_decay=config.get('weight_decay'))
+                                      eps=config.get('eps'))
     elif optimizer_type == "adam":
-        optimizer = torch.optim.Adam(list(model.parameters()),
+        optimizer = torch.optim.Adam(optimizer_grouped_parameters,
                                      lr=config.get('learning_rate'),
                                      betas=(0.9, 0.98),
-                                     eps=1e-9)
+                                     eps=config.get('eps'))
     else:
         raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
@@ -110,12 +118,11 @@ def pad_and_mask_combined_graph(unbatched_graphs):
 
         unbatched_graphs[graph_idx] = graph
 
-    padding_mask = padding_mask
     unbatched_graphs = torch.stack(unbatched_graphs)
     return unbatched_graphs, padding_mask, seq_len
 
 
-def construct_future_mask(seq_len, device="cuda"):
+def construct_future_mask(seq_len, device):
     """
     Construct a binary mask that contains 1's for all valid connections and 0's for all outgoing future connections.
     This mask will be applied to the attention logits in decoder self-attention such that all logits with a 0 mask
@@ -182,3 +189,9 @@ def get_sentence_embedding(sentence):
     assert all(emb.shape == emb_shape for emb in sentence_embeddings.values())
 
     return sentence_embeddings
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)

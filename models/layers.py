@@ -4,14 +4,14 @@ Module that defines common NN layers to be used across models
 
 import math
 import torch
-from torch.nn import Dropout
+from torch import nn
 from models.utils import xavier_init_weights
 
 
 class PositionalEncoding(nn.Module):
     def __init__(self, max_len, d_model, dropout=0.0):
         super().__init__()
-        self.dropout = Dropout(p=dropout)
+        self.dropout = nn.Dropout(p=dropout)
         max_len = max_len ** 2
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0,

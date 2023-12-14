@@ -35,7 +35,7 @@ def calculate_accuracy_helper(batch_labels, batch_outputs, seq_len, is_adj=False
 
 def calculate_batch_accuracies(output_adj, y_adj, output_node_type, y_node_types, seq_len):
     # Adjust outputs for accuracy calculation
-    output_adj = sample_sigmoid(torch.sigmoid(output_adj), output_adj.device, sample=False, threshold=0.5)
+    output_adj = sample_sigmoid(torch.sigmoid(output_adj), output_adj.device, threshold=0.5)
     output_node_type = adjust_softmax(output_node_type, output_node_type.device)
 
     batch_accuracy_adj = calculate_accuracy_helper(y_adj, output_adj, seq_len, is_adj=True)

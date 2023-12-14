@@ -2,16 +2,18 @@
 Main training pipeline module
 """
 
+import os
 import torch
 from torch import multiprocessing as torchmultiprocessing
 torchmultiprocessing.set_sharing_strategy('file_system')
 from tqdm import tqdm, trange
 import argparse
+from transformers import get_scheduler
 
 from config.configs import configs
 from data.dataset import get_dataset, get_data_loader
 from models.model import Model
-from utils import create_optimizer, calculate_loss
+from utils import create_optimizer, calculate_loss, set_seed
 from eval import calculate_batch_accuracies
 
 import logging
@@ -23,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger("train")
 
 
-def run_epoch(dataloader, model, optimizer, config, evaluation=False, epoch=None):
+def run_epoch(config, dataloader, model, optimizer, scheduler, evaluation=False, epoch=None):
     model.eval() if evaluation else model.train()
 
     metrics = {
@@ -42,13 +44,14 @@ def run_epoch(dataloader, model, optimizer, config, evaluation=False, epoch=None
             for key, loss in zip(metrics["losses"].keys(), losses):
                 metrics["losses"][key].append(loss.item())
 
-            optimizer.zero_grad()
             losses[0].backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
 
-        accuracies = calculate_batch_accuracies(output_adj, y_adj, output_node_type, y_node_types, seq_len,
-                                                evaluation=evaluation)
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+
+        accuracies = calculate_batch_accuracies(output_adj, y_adj, output_node_type, y_node_types, seq_len)
         for key, acc in zip(metrics["batch_accuracies"].keys(), accuracies):
             metrics["batch_accuracies"][key].append(acc)
 
@@ -79,7 +82,7 @@ def log_epoch_summary(epoch, metrics):
     logger.info("======================================================")
 
 
-def prepare_model_and_optimizer(vocabulary, tables_vocab, columns_vocab, config, device="cuda:0"):
+def prepare_model_and_optimizer(vocabulary, tables_vocab, columns_vocab, config, device):
     model = Model(vocabulary=vocabulary,
                   tables_vocab=tables_vocab,
                   columns_vocab=columns_vocab,
@@ -97,7 +100,6 @@ def prepare_model_and_optimizer(vocabulary, tables_vocab, columns_vocab, config,
 
 def run_training(config):
     logger.info(f"Running training with config: {config}")
-
     root_path = config.get('root_path')
 
     # Train data
@@ -105,35 +107,70 @@ def run_training(config):
                                                                          split="train_spider",
                                                                          max_prev_node=config.get('max_prev_bfs_node'))
 
-    # Validation data
-    val_dataset, val_vocabulary, val_tables_vocab, val_columns_vocab = get_dataset(root_path,
-                                                                                   split="dev",
-                                                                                   max_prev_node=config.get('max_prev_bfs_node'))
+    if config.get('run_validation', False):
+        # Validation data
+        val_dataset, val_vocabulary, val_tables_vocab, val_columns_vocab = get_dataset(root_path,
+                                                                                       split="dev",
+                                                                                       max_prev_node=config.get(
+                                                                                           'max_prev_bfs_node'))
 
     # Create the model and optimizer
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+
+    device = "cpu"
+
     model, optimizer = prepare_model_and_optimizer(vocabulary,
                                                    tables_vocab,
                                                    columns_vocab,
-                                                   config)
+                                                   config,
+                                                   device=device)
 
     if config.get('run_training', True):
+        train_dataloader = get_data_loader(train_dataset,
+                                           batch_size=config.get('batch_size'),
+                                           shuffle=True,
+                                           num_workers=config.get('num_dataloader_workers'),
+                                           tables_vocab=tables_vocab,
+                                           columns_vocab=columns_vocab)
+
+        num_training_steps = len(train_dataloader) // config.get('gradient_accumulation_steps') * config.get('num_epochs')
+        num_warmup_steps = int(num_training_steps * config.get('warmup_proportion'))
+
+        scheduler = get_scheduler(
+            "linear",
+            optimizer=optimizer,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_training_steps,
+        )
+
+        # Report training info
+        logging.info("***** Running training *****")
+        logging.info("  Num examples = %d", len(train_dataset))
+        logging.info("  Num Epochs = %d", config.get('num_epochs'))
+        logging.info("  Warmup steps = %d", num_warmup_steps)
+        logging.info("  Total optimization steps = %d", num_training_steps)
+
         # Run training for the desired number of epochs
+        optimizer.zero_grad()
+        set_seed(config.get('seed'))
+
+        model.train()
         for epoch in trange(config.get('num_epochs'), desc="Training"):
             # Train loop
             logger.info(f"RUNNING TRAINING EPOCH #{epoch + 1}")
-            train_dataloader = get_data_loader(train_dataset,
-                                               batch_size=config.get('batch_size'),
-                                               shuffle=True,
-                                               num_workers=config.get('num_dataloader_workers'),
-                                               tables_vocab=tables_vocab,
-                                               columns_vocab=columns_vocab)
 
-            metrics = run_epoch(train_dataloader,
+            metrics = run_epoch(config,
+                                train_dataloader,
                                 model,
                                 optimizer,
+                                scheduler,
                                 evaluation=False,
-                                epoch=epoch,
-                                config=config)
+                                epoch=epoch)
 
             log_epoch_summary(epoch, metrics)
 
