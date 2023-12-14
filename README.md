@@ -20,6 +20,8 @@ We are still polishing up the code and will submit the updated version soon. Tha
 
 # Citation
 
+You can cite our work with the following BibTeX entry:
+
 `@misc{bazaga2023sqlformer,
       title={SQLformer: Deep Auto-Regressive Query Graph Generation for Text-to-SQL Translation}, 
       author={Adrián Bazaga and Pietro Liò and Gos Micklem},
