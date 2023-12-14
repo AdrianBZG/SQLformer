@@ -29,11 +29,12 @@ def run_epoch(config, dataloader, model, optimizer, scheduler, evaluation=False,
     model.eval() if evaluation else model.train()
 
     metrics = {
-        "losses": {"adj": [], "node_types": [], "table_concepts": [], "column_concepts": [], "all": []},
+        "losses": {"all": [], "adj": [], "node_types": [], "table_concepts": [], "column_concepts": []},
         "batch_accuracies": {"adj": [], "types": [], "all": []}
     }
 
-    for batch_idx, batch in enumerate(tqdm(dataloader)):
+    data_iterator = tqdm(dataloader)
+    for batch_idx, batch in enumerate(data_iterator):
         to_device = lambda x: batch[x].to(model.device)
         y_adj, y_node_types, y_table_targets, y_column_targets, x_adj_padding_mask = map(to_device, ["y_adj", "y_node_types", "y_table_targets", "y_column_targets", "x_adj_padding_mask"])
 
@@ -55,20 +56,9 @@ def run_epoch(config, dataloader, model, optimizer, scheduler, evaluation=False,
         for key, acc in zip(metrics["batch_accuracies"].keys(), accuracies):
             metrics["batch_accuracies"][key].append(acc)
 
-        log_batch_info(batch_idx, epoch, metrics, evaluation)
+        data_iterator.set_postfix({'loss': "{:.8f}".format(metrics["losses"]["all"][-1])})
 
     return metrics
-
-
-def log_batch_info(batch_idx, epoch, metrics, evaluation):
-    if evaluation or epoch is None:
-        return
-
-    logger.info(f'Epoch [{epoch}] Batch: {batch_idx}\n'
-                f'Total Loss: {metrics["losses"]["all"][-1]}\n')
-
-    for loss_name, loss_value in metrics["losses"].items():
-        logger.info(f'Loss {loss_name}: {loss_value[-1]}')
 
 
 def log_epoch_summary(epoch, metrics):
@@ -107,12 +97,12 @@ def run_training(config):
                                                                          split="train_spider",
                                                                          max_prev_node=config.get('max_prev_bfs_node'))
 
-    if config.get('run_validation', False):
-        # Validation data
-        val_dataset, val_vocabulary, val_tables_vocab, val_columns_vocab = get_dataset(root_path,
-                                                                                       split="dev",
-                                                                                       max_prev_node=config.get(
-                                                                                           'max_prev_bfs_node'))
+    #if config.get('run_validation', False):
+    #    # Validation data
+    #    val_dataset, val_vocabulary, val_tables_vocab, val_columns_vocab = get_dataset(root_path,
+    #                                                                                   split="dev",
+    #                                                                                   max_prev_node=config.get(
+    #                                                                                       'max_prev_bfs_node'))
 
     # Create the model and optimizer
     if torch.cuda.is_available():
@@ -160,9 +150,10 @@ def run_training(config):
         set_seed(config.get('seed'))
 
         model.train()
-        for epoch in trange(config.get('num_epochs'), desc="Training"):
+        epoch_iterator = trange(int(config.get('num_epochs')))
+        for epoch in epoch_iterator:
             # Train loop
-            logger.info(f"RUNNING TRAINING EPOCH #{epoch + 1}")
+            epoch_iterator.set_postfix({'epoch': epoch + 1})
 
             metrics = run_epoch(config,
                                 train_dataloader,
@@ -177,20 +168,21 @@ def run_training(config):
             if config.get('run_validation', False):
                 with torch.no_grad():
                     # Validation loop
-                    logger.info(f"RUNNING VALIDATION FOR EPOCH #{epoch + 1}")
-                    val_dataloader = get_data_loader(val_dataset,
+                    logger.debug(f"RUNNING VALIDATION FOR EPOCH #{epoch + 1}")
+                    val_dataloader = get_data_loader(train_dataset,
                                                      batch_size=config.get('batch_size'),
                                                      shuffle=False,
                                                      num_workers=config.get('num_dataloader_workers'),
                                                      tables_vocab=tables_vocab,
                                                      columns_vocab=columns_vocab)
 
-                    metrics = run_epoch(val_dataloader,
+                    metrics = run_epoch(config,
+                                        val_dataloader,
                                         model,
                                         optimizer,
+                                        scheduler,
                                         evaluation=True,
-                                        epoch=epoch,
-                                        config=config)
+                                        epoch=epoch)
 
                     log_epoch_summary(epoch, metrics)
 
